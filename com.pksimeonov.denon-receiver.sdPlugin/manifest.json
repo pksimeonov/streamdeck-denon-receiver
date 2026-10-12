@@ -1,0 +1,203 @@
+{
+	"Name": "Receiver Control",
+	"Version": "1.0.0.0",
+	"Author": "pksimeonov",
+	"Actions": [
+		{
+			"Name": "Volume Control",
+			"UUID": "com.pksimeonov.denon-receiver.volume",
+			"Icon": "imgs/actions/volume/volume2",
+			"Tooltip": "Displays the current volume and allows for adjustment.",
+			"PropertyInspectorPath": "ui/action.html",
+			"Controllers": [
+				"Keypad",
+				"Encoder"
+			],
+			"DisableAutomaticStates": true,
+			"Encoder": {
+				"layout": "$B1",
+				"Icon": "imgs/actions/volume/dial-unmuted",
+				"TriggerDescription": {
+					"Push": "Mute/Unmute",
+					"Rotate": "Adjust Volume",
+					"Touch": "Mute/Unmute"
+				}
+			},
+			"States": [
+				{
+					"Name": "Unmute",
+					"Image": "imgs/actions/volume/volume2",
+					"TitleAlignment": "bottom",
+					"FontSize": 10
+				},
+				{
+					"Name": "Mute",
+					"Image": "imgs/actions/volume/volumeMute",
+					"TitleAlignment": "bottom",
+					"FontSize": 10
+				},
+				{
+					"Name": "VolumeUp",
+					"Image": "imgs/actions/volume/volumeUp",
+					"TitleAlignment": "bottom",
+					"FontSize": 10
+				},
+				{
+					"Name": "VolumeDown",
+					"Image": "imgs/actions/volume/volumeDown",
+					"TitleAlignment": "bottom",
+					"FontSize": 10
+				}
+			]
+		},
+		{
+			"Name": "Power Control",
+			"UUID": "com.pksimeonov.denon-receiver.power",
+			"Icon": "imgs/actions/power/powerOn",
+			"Tooltip": "Turns the receiver on or off.",
+			"PropertyInspectorPath": "ui/action.html",
+			"Controllers": [
+				"Keypad"
+			],
+			"DisableAutomaticStates": true,
+			"States": [
+				{
+					"Name": "On",
+					"Image": "imgs/actions/power/powerOn"
+				},
+				{
+					"Name": "Off",
+					"Image": "imgs/actions/power/powerOff"
+				}
+			]
+		},
+		{
+			"Name": "Source Control",
+			"UUID": "com.pksimeonov.denon-receiver.source",
+			"Icon": "imgs/actions/source/source",
+			"Tooltip": "Displays the current source and allows for selection.",
+			"PropertyInspectorPath": "ui/action.html",
+			"Controllers": [
+				"Keypad"
+			],
+			"DisableAutomaticStates": true,
+			"States": [
+				{
+					"Name": "Source",
+					"Image": "imgs/actions/source/source"
+				}
+			]
+		},
+		{
+			"Name": "Dynamic Volume Control",
+			"UUID": "com.pksimeonov.denon-receiver.dynvol",
+			"Icon": "imgs/actions/dynvol/icon",
+			"Tooltip": "Displays the current dynamic volume state and cycles through the states.",
+			"PropertyInspectorPath": "ui/action.html",
+			"Controllers": [
+				"Keypad"
+			],
+			"DisableAutomaticStates": true,
+			"States": [
+				{
+					"Name": "Dynvol",
+					"Image": "imgs/actions/dynvol/dynvol"
+				},
+				{
+					"Name": "Off",
+					"Image": "imgs/actions/dynvol/off"
+				},
+				{
+					"Name": "Light",
+					"Image": "imgs/actions/dynvol/light"
+				},
+				{
+					"Name": "Medium",
+					"Image": "imgs/actions/dynvol/medium"
+				},
+				{
+					"Name": "Heavy",
+					"Image": "imgs/actions/dynvol/heavy"
+				}
+			]
+		},
+		{
+			"Name": "Subwoofer Level",
+			"UUID": "com.pksimeonov.denon-receiver.sublevel",
+			"Icon": "imgs/actions/sublevel/sublevel",
+			"Tooltip": "Adjusts the subwoofer channel level (Options → Channel Level). Does not affect MultEQ calibration. Place on a dial to adjust, or on a key to show the current level and reset to 0 dB.",
+			"PropertyInspectorPath": "ui/action.html",
+			"Controllers": [
+				"Keypad",
+				"Encoder"
+			],
+			"DisableAutomaticStates": true,
+			"Encoder": {
+				"layout": "$B1",
+				"Icon": "imgs/actions/sublevel/dial",
+				"TriggerDescription": {
+					"Push": "Reset to 0dB",
+					"Rotate": "Adjust Sub Level",
+					"Touch": "Reset to 0dB"
+				}
+			},
+			"States": [
+				{
+					"Name": "SubLevel",
+					"Image": "imgs/actions/sublevel/sublevel",
+					"TitleAlignment": "bottom",
+					"FontSize": 10
+				}
+			]
+		},
+		{
+			"Name": "Dynamic EQ Control",
+			"UUID": "com.pksimeonov.denon-receiver.dyneq",
+			"Icon": "imgs/actions/dyneq/icon",
+			"Tooltip": "Toggles Dynamic EQ on or off.",
+			"PropertyInspectorPath": "ui/action.html",
+			"Controllers": [
+				"Keypad"
+			],
+			"DisableAutomaticStates": true,
+			"States": [
+				{
+					"Name": "DynEQ",
+					"Image": "imgs/actions/dyneq/dyneq-on"
+				},
+				{
+					"Name": "On",
+					"Image": "imgs/actions/dyneq/dyneq-on"
+				},
+				{
+					"Name": "Off",
+					"Image": "imgs/actions/dyneq/dyneq-off"
+				}
+			]
+		}
+	],
+	"Category": "Receiver Control",
+	"CategoryIcon": "imgs/plugin/category-icon",
+	"CodePath": "bin/plugin.js",
+	"Description": "Uses the network interface on many Denon/Marantz receivers to control basic functions. Requires a model with HEOS support for network control.",
+	"Icon": "imgs/plugin/marketplace",
+	"SDKVersion": 2,
+	"Software": {
+		"MinimumVersion": "6.4"
+	},
+	"OS": [
+		{
+			"Platform": "mac",
+			"MinimumVersion": "10.15"
+		},
+		{
+			"Platform": "windows",
+			"MinimumVersion": "10"
+		}
+	],
+	"Nodejs": {
+		"Version": "20",
+		"Debug": "enabled"
+	},
+	"UUID": "com.pksimeonov.denon-receiver"
+}

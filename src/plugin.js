@@ -1,0 +1,62 @@
+import streamDeck, { LogLevel } from "@elgato/streamdeck";
+/** @typedef {import("@elgato/streamdeck").Logger} Logger */
+/** @typedef {import("@elgato/streamdeck").SystemDidWakeUpEvent} SystemDidWakeUpEvent */
+
+const logger = streamDeck.logger.createScope("Plugin");
+// logger.setLevel(LogLevel.TRACE);
+
+import { AVRTracker } from "./modules/tracker";
+AVRTracker.setLogger(logger);
+
+import { VolumeAction } from "./actions/volume";
+import { PowerAction } from "./actions/power";
+import { SourceAction } from "./actions/source";
+import { DynVolAction } from "./actions/dynVol";
+import { SubLevelAction } from "./actions/subLevel";
+import { DynEQAction } from "./actions/dynEQ";
+
+
+/** @typedef {import("./modules/connection").AVRConnection} AVRConnection */
+
+/**
+ * Plugin-level context for actions to access
+ * @typedef {Object} PluginContext
+ * @property {Record<ReceiverUUID, AVRConnection>} avrConnections - Maps receiver UUIDs to connections
+ * @property {Logger} logger - Logger instance
+ */
+
+/** @typedef {string} ReceiverUUID */
+
+/** @type {PluginContext} */
+const plugin = {
+    avrConnections: {},
+    logger
+};
+
+streamDeck.actions.registerAction(new VolumeAction(plugin));
+streamDeck.actions.registerAction(new PowerAction(plugin));
+streamDeck.actions.registerAction(new SourceAction(plugin));
+streamDeck.actions.registerAction(new DynVolAction(plugin));
+streamDeck.actions.registerAction(new SubLevelAction(plugin));
+streamDeck.actions.registerAction(new DynEQAction(plugin));
+
+// Connect to the StreamDeck and kick-off the rest of the initialization
+await streamDeck.connect();
+
+// Start the SSDP/UPnP scanner and perform a scan if no receivers are found in the cache
+await AVRTracker.init();
+if (Object.keys(AVRTracker.getReceivers()).length === 0) {
+    // Perform a quick initial scan, followed by a longer scan on startup so that existing actions can connect
+    // Between the two scans, that should cover fast (wired) connections as well as slower (wireless) connections
+    AVRTracker.searchForReceivers(1, 1)
+        .then(() => AVRTracker.searchForReceivers(3, 3));
+}
+
+// When the system wakes up, we need to re-connect to receivers
+streamDeck.system.onSystemDidWakeUp(() => {
+    logger.info("System woke up, refreshing connections.");
+    Object.values(plugin.avrConnections).forEach(connection => {
+        connection.disconnect();
+        connection.connect();
+    });
+});
