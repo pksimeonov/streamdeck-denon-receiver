@@ -16,16 +16,11 @@ import { PluginAction } from "./action";
 @action({ UUID: "com.pksimeonov.denon-receiver.power" })
 export class PowerAction extends PluginAction {
 	/**
-	 * Handle the action appearing on the Stream Deck.
-	 * @param {WillAppearEvent} ev - The event object.
+	 * Redraw the action from its receiver's current state.
+	 * @param {Action} action - The action object.
 	 */
-	async onWillAppear(ev) {
-		await super.onWillAppear(ev);
-
-		// Set the initial state of the action based on the receiver's power status
-		const connection = this.getConnection(ev.action.id);
-		const zone = /** @type {number} */ (ev.payload.settings.zone) || 0;
-		updateActionState(ev.action, connection, zone);
+	refreshActionState(action) {
+		updateActionState(action, this.getConnection(action.id));
 	}
 
 	/**
@@ -34,7 +29,10 @@ export class PowerAction extends PluginAction {
 	 */
 	onKeyDown(ev) {
 		const connection = this.getConnection(ev.action.id);
-		if (!connection) return;
+		if (!connection) {
+			ev.action.showAlert();
+			return;
+		}
 
 		const settings = ev.payload.settings;
 		const zone = /** @type {number} */ (settings.zone) || 0;

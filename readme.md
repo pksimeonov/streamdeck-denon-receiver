@@ -2,6 +2,8 @@
 
 A Stream Deck plugin that controls Denon and Marantz receivers with HEOS over the network (telnet protocol). It works on all Stream Deck models. On a Stream Deck +, the dials show the live volume and subwoofer level on the touch strip.
 
+> **Mirabox, Soomfon or Ajazz user?** This plugin is for Elgato Stream Deck. Use the [mirabox-denon-receiver](https://github.com/pksimeonov/mirabox-denon-receiver) repository instead.
+
 ## Features
 
 ### Volume Control
@@ -55,6 +57,8 @@ Volume, Power and Source support the Main zone and Zone 2.
 3. If discovery fails, type the receiver's address into **Manual IP** and press **Connect**. This is the recommended approach if discovery is unreliable. Give the receiver a fixed IP address (static or DHCP reservation).
 4. The **Status** field shows the connection status.
 5. Choose the **Zone** (Main or Zone 2) and the action-specific options, such as the volume mode, step size, power action or input source.
+
+You only need to pick the receiver once. The last receiver you connected becomes the default, and every action you add afterwards uses it automatically. If only one receiver is found on the network, it becomes the default without any setup. To control a different receiver from one action, pick it in that action's settings.
 
 ## Development
 
@@ -125,14 +129,14 @@ Notes:
 
 **Actions show a warning triangle**
 
-The receiver is unreachable. The plugin reconnects automatically, up to 10 attempts. Check that the receiver is powered (network standby enabled) and reachable on the network.
+The receiver is unreachable. The plugin keeps reconnecting automatically, retrying at most every 30 seconds. Check that the receiver is powered (network standby enabled) and reachable on the network.
 
 **Connection drops after toggling a VPN or after sleep**
 
-The plugin reconnects when the connection resets and when the computer wakes up. If it does not recover, press Connect in the action settings.
+The plugin reconnects when the connection resets and when the computer wakes up. It also checks the receiver every 30 seconds and reconnects if it stops responding. If the receiver gets a new IP address, discovery picks it up and the connection follows it. If it does not recover, press Connect in the action settings.
 
 ## Credits
 
-Based on [mthiel/stream-deck-denon-receiver](https://github.com/mthiel/stream-deck-denon-receiver) by Matthew Thiel.
+Based on my [Mirabox implementation](https://github.com/pksimeonov/mirabox-denon-receiver), which in turn is based on [mthiel/stream-deck-denon-receiver](https://github.com/mthiel/stream-deck-denon-receiver) by Matthew Thiel.
 
-Mirabox, Soomfon and Ajazz users: the legacy Mirabox build lives on the `main` branch and the `mirabox-v1.0.0` tag of the original [mirabox-denon-receiver](https://github.com/pksimeonov/mirabox-denon-receiver) repository.
+Mirabox, Soomfon and Ajazz users: use the [mirabox-denon-receiver](https://github.com/pksimeonov/mirabox-denon-receiver) repository. The Mirabox build lives on its `main` branch and the `mirabox-v1.0.0` tag.

@@ -5,6 +5,7 @@ import streamDeck, { SingletonAction } from "@elgato/streamdeck";
 /** @typedef {import("@elgato/streamdeck").ActionContext} ActionContext */
 /** @typedef {import("@elgato/streamdeck").WillAppearEvent} WillAppearEvent */
 /** @typedef {import("@elgato/streamdeck").WillDisappearEvent} WillDisappearEvent */
+/** @typedef {import("@elgato/streamdeck").DidReceiveSettingsEvent} DidReceiveSettingsEvent */
 /** @typedef {import("@elgato/streamdeck").PropertyInspectorDidAppearEvent} PropertyInspectorDidAppearEvent */
 /** @typedef {import("@elgato/streamdeck").SendToPluginEvent} SendToPluginEvent */
 
@@ -13,6 +14,7 @@ import streamDeck, { SingletonAction } from "@elgato/streamdeck";
 
 import { AVRConnection } from "../modules/connection";
 import { AVRTracker } from "../modules/tracker";
+import { GlobalSettings } from "../modules/globals";
 /** @typedef {import("../modules/tracker").ReceiverList} ReceiverList */
 /** @typedef {import("../modules/tracker").ReceiverInfo} ReceiverInfo */
 
@@ -39,6 +41,47 @@ import { AVRTracker } from "../modules/tracker";
  * @property {string} [source] - The source to set on the receiver
  * @property {number} [stepSize] - The step size for dial adjustments (in dB)
  */
+
+/**
+ * Actions that couldn't be connected to a receiver yet, keyed by action instance ID.
+ * Shared by all action types so that one discovery or default change retries them all.
+ * @type {Map<string, {owner: PluginAction, action: Action}>}
+ */
+const waitingActions = new Map();
+
+/**
+ * Retry connecting every action that is still waiting for a receiver.
+ */
+export function retryWaitingActions() {
+	const waiting = [...waitingActions.values()];
+	waitingActions.clear();
+	for (const { owner, action } of waiting) {
+		action.getSettings()
+			.then((settings) => owner.attachAction(action, /** @type {ActionSettings} */ (settings)))
+			.catch((error) => owner.logger.warn(`Failed to retry receiver for ${action.id}: ${error.message}`));
+	}
+}
+
+/**
+ * Make a receiver selection the default for new actions, and hand it to any waiting actions.
+ * @param {ActionSettings} settings - Settings holding a discovered receiver UUID or a manual IP.
+ */
+export async function setDefaultReceiver(settings) {
+	const manualIp = settings.manualIp?.trim();
+	const uuid = settings.uuid?.toString();
+
+	/** @type {import("../modules/globals").DefaultReceiver} */
+	const defaultReceiver = manualIp
+		? { manualIp, name: manualIp }
+		: { uuid, name: (uuid && AVRTracker.getReceivers()[uuid]?.name) || settings.name };
+
+	const current = GlobalSettings.get().defaultReceiver;
+	if (current?.uuid !== defaultReceiver.uuid || current?.manualIp !== defaultReceiver.manualIp || current?.name !== defaultReceiver.name) {
+		await GlobalSettings.update({ defaultReceiver });
+	}
+
+	retryWaitingActions();
+}
 
 /**
  * Base action class for the plugin
@@ -131,6 +174,15 @@ export class PluginAction extends SingletonAction {
 	}
 
 	/**
+	 * Whether the settings select a receiver (discovered or manual IP).
+	 * @param {ActionSettings} settings
+	 * @returns {boolean}
+	 */
+	hasReceiverSelection(settings) {
+		return !!(settings.uuid?.toString() || this.normalizeManualIp(settings.manualIp));
+	}
+
+	/**
 	 * Handle the PI appearing
 	 * @param {PropertyInspectorDidAppearEvent} ev - The event object.
 	 */
@@ -139,47 +191,90 @@ export class PluginAction extends SingletonAction {
 	}
 
 	/**
-	 * Handles checking if an appearing action has a receiver selected already and
-	 * attempts to put it in the correct state.
+	 * Connect an appearing action to its receiver.
 	 * @param {WillAppearEvent} ev - The event object.
 	 */
 	async onWillAppear(ev) {
-		const settings = /** @type {ActionSettings} */ (ev.payload.settings);
-		const { receiverId, isManual } = this.resolveReceiverSelection(settings);
-		if (!receiverId) {
-			// No receiver selected, clean-up any existing associations
-			delete this.actionReceiverMap[ev.action.id];
+		await this.attachAction(ev.action, /** @type {ActionSettings} */ (ev.payload.settings));
+	}
+
+	/**
+	 * Stop retrying an action that is no longer visible.
+	 * @param {WillDisappearEvent} ev - The event object.
+	 */
+	onWillDisappear(ev) {
+		waitingActions.delete(ev.action.id);
+	}
+
+	/**
+	 * Pick up settings changed in the PI (e.g. the zone).
+	 * @param {DidReceiveSettingsEvent} ev - The event object.
+	 */
+	onDidReceiveSettings(ev) {
+		const entry = this.actionReceiverMap[ev.action.id];
+		if (entry) {
+			entry.zone = /** @type {number} */ (ev.payload.settings.zone) || 0;
+			this.refreshActionState(ev.action);
+		}
+	}
+
+	/**
+	 * Associate an action with its receiver, connecting to it if needed.
+	 * Actions without a receiver of their own pick up the default receiver.
+	 * If the receiver can't be resolved yet (nothing configured, or not discovered yet), the action
+	 * waits and is retried when receivers are discovered or a default receiver is chosen.
+	 * @param {Action} action - The action instance.
+	 * @param {ActionSettings} settings - The action's settings.
+	 * @returns {Promise<AVRConnection | undefined>}
+	 */
+	async attachAction(action, settings) {
+		waitingActions.delete(action.id);
+
+		if (!this.hasReceiverSelection(settings)) {
+			const defaultReceiver = GlobalSettings.get().defaultReceiver;
+			if (defaultReceiver && this.hasReceiverSelection(defaultReceiver)) {
+				settings = {
+					...settings,
+					uuid: defaultReceiver.uuid || "",
+					manualIp: defaultReceiver.manualIp || "",
+					name: defaultReceiver.name
+				};
+				await action.setSettings(settings);
+				this.logger.info(`Assigned default receiver ${defaultReceiver.name || defaultReceiver.manualIp || defaultReceiver.uuid} to ${action.id}.`);
+			}
+		}
+
+		const { receiverId } = this.resolveReceiverSelection(settings);
+		const connection = receiverId !== undefined
+			? this.avrConnections[receiverId] ?? await this.connectReceiver(settings)
+			: undefined;
+
+		if (receiverId === undefined || connection === undefined) {
+			delete this.actionReceiverMap[action.id];
+			waitingActions.set(action.id, { owner: this, action });
+			this.refreshActionState(action);
 			return;
 		}
 
-		const zone = /** @type {number} */ (settings.zone) || 0;
-
-		// If a connection doesn't exist yet, try to create one
-		if (receiverId in this.avrConnections === false) {
-			// Should we wait for the tracker to be updated first?
-			if (!isManual && AVRTracker.isScanning()) {
-				// Wait for the scan to complete and try again in case the receiver was found
-				AVRTracker.once("scanned", () => this.onWillAppear(ev));
-				return;
-			}
-
-			// Try to open the new connection to this receiver
-			if (await this.connectReceiver(settings) === undefined) {
-				return;
-			}
-		}
+		this.actionReceiverMap[action.id] = {
+			uuid: receiverId,
+			zone: /** @type {number} */ (settings.zone) || 0
+		};
 
 		// Set up or refresh the listener for receiver events
 		if (this.manifestId) {
-			this.avrConnections[receiverId].on(this.routeReceiverEvent.bind(this), this.manifestId);
+			connection.on(this.routeReceiverEvent.bind(this), this.manifestId);
 		}
 
-		// Update the map with the selected receiver ID for this action
-		this.actionReceiverMap[ev.action.id] = {
-			uuid: receiverId,
-			zone: zone
-		};
+		this.refreshActionState(action);
+		return connection;
 	}
+
+	/**
+	 * Redraw an action from its receiver's current state. Overridden by actions that show state.
+	 * @param {Action} action - The action instance.
+	 */
+	refreshActionState(action) {}
 
 	/**
 	 * Handle events from the Property Inspector.
@@ -201,6 +296,7 @@ export class PluginAction extends SingletonAction {
 
 	/**
 	 * Handle a user choosing a receiver from the PI.
+	 * A successful choice also becomes the default receiver for new actions.
 	 * @param {SendToPluginEvent} ev - The event object.
 	 */
 	async onUserConfiguredReceiver(ev) {
@@ -209,7 +305,6 @@ export class PluginAction extends SingletonAction {
 			...(await ev.action.getSettings()),
 			...(ev.payload.settings || {})
 		};
-		const zone = /** @type {number} */ (settings.zone) || 0;
 		const { receiverId, host, isManual } = this.resolveReceiverSelection(settings);
 
 		let statusMsg = "";
@@ -218,39 +313,15 @@ export class PluginAction extends SingletonAction {
 			delete this.actionReceiverMap[ev.action.id];
 			statusMsg = "Invalid IP address";
 		} else if (receiverId) {
-			// Connect to the receiver if the user chose one
-			if (receiverId in this.avrConnections === false) {
-				// No connection yet, try to connect to the receiver
-				const connection = await this.connectReceiver(settings);
-				if (connection !== undefined) {
-					// Add the connection to the map if we were successful
-					this.actionReceiverMap[ev.action.id] = {
-						uuid: receiverId,
-						zone: zone
-					};
-					statusMsg = connection.status.statusMsg;
+			// Persist the choice first, so that attaching doesn't substitute the default receiver
+			await ev.action.setSettings(settings);
 
-					// Set up or refresh the listener for receiver events
-					if (this.manifestId) {
-						this.avrConnections[receiverId].on(this.routeReceiverEvent.bind(this), this.manifestId);
-					}
-				} else {
-					// If we failed to connect, clear the association
-					delete this.actionReceiverMap[ev.action.id];
-					statusMsg = isManual ? "Can't connect to receiver" : "Can't find receiver";
-				}
+			const connection = await this.attachAction(ev.action, settings);
+			if (connection !== undefined) {
+				statusMsg = connection.status.statusMsg;
+				await setDefaultReceiver(settings);
 			} else {
-				// We already have a connection, so just update the receiver map
-				this.actionReceiverMap[ev.action.id] = {
-					uuid: receiverId,
-					zone: zone
-				};
-				statusMsg = this.avrConnections[receiverId].status.statusMsg;
-
-				// Set up or refresh the listener for receiver events
-				if (this.manifestId) {
-					this.avrConnections[receiverId].on(this.routeReceiverEvent.bind(this), this.manifestId);
-				}
+				statusMsg = isManual ? "Can't connect to receiver" : "Can't find receiver";
 			}
 		} else {
 			// Ensure the receiver association is cleared if no receiver is selected
@@ -289,7 +360,7 @@ export class PluginAction extends SingletonAction {
 				value: ""
 			},
 			...Object.entries(receivers).map(([uuid, receiver]) => ({
-				label: receiver.name || receiver.currentIP,
+				label: receiver.name ? `${receiver.name} (${receiver.currentIP})` : receiver.currentIP,
 				value: uuid
 			}))
 		];
@@ -410,6 +481,7 @@ export class PluginAction extends SingletonAction {
 	 */
 	onReceiverConnected(ev) {
 		this.updateStatusMessage(ev.connection.status.statusMsg);
+		ev.actions?.forEach((action) => this.refreshActionState(action));
 	}
 
 	/**

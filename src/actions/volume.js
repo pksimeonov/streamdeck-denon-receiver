@@ -13,10 +13,34 @@ import { PluginAction } from "./action";
 /** @typedef {import("../modules/connection").AVRConnection} AVRConnection */
 /** @typedef {import("../modules/connection").ReceiverEvent} ReceiverEvent */
 
+/** Smaller variants of the icons for the dial's circle */
+const circleImages = {
+	unmuted: "imgs/actions/volume/circle-unmuted",
+	muted: "imgs/actions/volume/circle-muted"
+};
+
 const images = {
 	unmuted: "imgs/actions/volume/dial-unmuted",
 	muted: "imgs/actions/volume/dial-muted"
 };
+
+/**
+ * The image last set on each dial's circle, so it is only sent when it changes.
+ * Stream Deck doesn't reliably use the manifest's Encoder.Icon, so the plugin sets it.
+ * @type {Map<string, string>}
+ */
+const dialImages = new Map();
+
+/**
+ * Set the image in a dial's circle, if it changed.
+ * @param {Action} action - The dial action.
+ * @param {string} image - The image path, without the file extension.
+ */
+function setDialImage(action, image) {
+	if (dialImages.get(action.id) === image) return;
+	dialImages.set(action.id, image);
+	action.setImage(`${image}.svg`);
+}
 
 /**
  * The Volume action class.
@@ -25,15 +49,11 @@ const images = {
 @action({ UUID: "com.pksimeonov.denon-receiver.volume" })
 export class VolumeAction extends PluginAction {
 	/**
-	 * Handle the will appear event.
-	 * @param {WillAppearEvent} ev - The event object.
+	 * Redraw the action from its receiver's current state.
+	 * @param {Action} action - The action object.
 	 */
-	async onWillAppear(ev) {
-		await super.onWillAppear(ev);
-
-		// Set the initial state of the action based on the receiver's volume & mute status
-		const connection = this.getConnection(ev.action.id);
-		updateActionState(ev.action, connection);
+	refreshActionState(action) {
+		updateActionState(action, this.getConnection(action.id));
 	}
 
 	/**
@@ -115,18 +135,6 @@ export class VolumeAction extends PluginAction {
 	}
 
 	/**
-	 * Handle a user configuring a receiver from the PI (discovered or manual IP).
-	 * @param {SendToPluginEvent} ev - The event object.
-	 */
-	async onUserConfiguredReceiver(ev) {
-		await super.onUserConfiguredReceiver(ev);
-
-		// Update the action state for the new receiver
-		const connection = this.getConnection(ev.action.id);
-		updateActionState(ev.action, connection);
-	}
-
-	/**
 	 * Handle a receiver volume changing.
 	 * @param {ReceiverEvent} ev - The event object.
 	 */
@@ -185,6 +193,7 @@ async function updateActionState(action, connection, zone) {
 			value: value,
 			icon: icon
 		});
+		setDialImage(action, muted || !power ? circleImages.muted : circleImages.unmuted);
 	} else if (action.isKey()) {
 		const volumeAction = settings.volumeAction || "toggleMute";
 

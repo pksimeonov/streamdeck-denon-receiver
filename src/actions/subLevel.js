@@ -15,6 +15,25 @@ import { PluginAction } from "./action";
 
 const CHANNEL = "SW";
 const ICON = "imgs/actions/sublevel/dial";
+const CIRCLE_ICON = "imgs/actions/sublevel/circle";
+
+/**
+ * The image last set on each dial's circle, so it is only sent when it changes.
+ * Stream Deck doesn't reliably use the manifest's Encoder.Icon, so the plugin sets it.
+ * @type {Map<string, string>}
+ */
+const dialImages = new Map();
+
+/**
+ * Set the image in a dial's circle, if it changed.
+ * @param {Action} action - The dial action.
+ * @param {string} image - The image path, without the file extension.
+ */
+function setDialImage(action, image) {
+	if (dialImages.get(action.id) === image) return;
+	dialImages.set(action.id, image);
+	action.setImage(`${image}.svg`);
+}
 
 /**
  * The Subwoofer Level action class.
@@ -29,14 +48,11 @@ const ICON = "imgs/actions/sublevel/dial";
 @action({ UUID: "com.pksimeonov.denon-receiver.sublevel" })
 export class SubLevelAction extends PluginAction {
 	/**
-	 * Handle the will appear event.
-	 * @param {WillAppearEvent} ev - The event object.
+	 * Redraw the action from its receiver's current state.
+	 * @param {Action} action - The action object.
 	 */
-	async onWillAppear(ev) {
-		await super.onWillAppear(ev);
-
-		const connection = this.getConnection(ev.action.id);
-		updateActionState(ev.action, connection);
+	refreshActionState(action) {
+		updateActionState(action, this.getConnection(action.id));
 	}
 
 	/**
@@ -74,17 +90,6 @@ export class SubLevelAction extends PluginAction {
 	 */
 	onKeyDown(ev) {
 		this.getConnection(ev.action.id)?.setChannelLevel(CHANNEL, 50) || ev.action.showAlert();
-	}
-
-	/**
-	 * Handle a user configuring a receiver from the PI (discovered or manual IP).
-	 * @param {SendToPluginEvent} ev - The event object.
-	 */
-	async onUserConfiguredReceiver(ev) {
-		await super.onUserConfiguredReceiver(ev);
-
-		const connection = this.getConnection(ev.action.id);
-		updateActionState(ev.action, connection);
 	}
 
 	/**
@@ -149,6 +154,7 @@ async function updateActionState(action, connection) {
 			value: value,
 			icon: ICON
 		});
+		setDialImage(action, CIRCLE_ICON);
 	} else if (action.isKey()) {
 		// Companion display button — show the current level as the title
 		action.setTitle(formatLevel(dbOffset, power));

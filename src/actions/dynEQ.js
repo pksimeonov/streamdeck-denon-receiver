@@ -17,14 +17,11 @@ import { PluginAction } from "./action";
 @action({ UUID: "com.pksimeonov.denon-receiver.dyneq" })
 export class DynEQAction extends PluginAction {
 	/**
-	 * Handle the action appearing on the Stream Deck.
-	 * @param {WillAppearEvent} ev - The event object.
+	 * Redraw the action from its receiver's current state.
+	 * @param {Action} action - The action object.
 	 */
-	async onWillAppear(ev) {
-		await super.onWillAppear(ev);
-
-		const connection = this.getConnection(ev.action.id);
-		updateActionState(ev.action, connection);
+	refreshActionState(action) {
+		updateActionState(action, this.getConnection(action.id));
 	}
 
 	/**
@@ -39,17 +36,6 @@ export class DynEQAction extends PluginAction {
 		}
 
 		connection.setDynamicEQ() || ev.action.showAlert();
-	}
-
-	/**
-	 * Handle a user configuring a receiver from the PI (discovered or manual IP).
-	 * @param {SendToPluginEvent} ev - The event object.
-	 */
-	async onUserConfiguredReceiver(ev) {
-		await super.onUserConfiguredReceiver(ev);
-
-		const connection = this.getConnection(ev.action.id);
-		updateActionState(ev.action, connection);
 	}
 
 	/**

@@ -22,7 +22,10 @@ export class SourceAction extends PluginAction {
 	 */
 	onKeyDown(ev) {
 		const connection = this.getConnection(ev.action.id);
-		if (!connection) return;
+		if (!connection) {
+			ev.action.showAlert();
+			return;
+		}
 
 		/** @type {ActionSettings} */
 		const settings = ev.payload.settings;
