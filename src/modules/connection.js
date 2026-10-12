@@ -1,6 +1,6 @@
 import net from "net";
 import { EventEmitter } from "events";
-import { setTimeout } from "timers/promises";
+import { setTimeout as delay } from "timers/promises";
 
 import { TelnetSocket } from "telnet-stream";
 
@@ -88,6 +88,12 @@ const sources = {
 };
 
 const COMMAND_SETTLE_MS = 250;
+const CONNECT_TIMEOUT_MS = 5000;
+const RECONNECT_BASE_MS = 1000;
+const RECONNECT_MAX_MS = 30000;
+const HEARTBEAT_INTERVAL_MS = 30000;
+const HEARTBEAT_DEAD_MS = 75000;
+const MAX_RX_BUFFER = 4096;
 
 /**
  * Represents a connection to a Denon AVR receiver
@@ -172,6 +178,48 @@ export class AVRConnection {
 	#reconnectCount = 0;
 
 	/**
+	 * The pending reconnect timer, if any. Only one may exist at a time.
+	 * @type {NodeJS.Timeout | undefined}
+	 */
+	#reconnectTimer;
+
+	/**
+	 * The timer that aborts a connection attempt that takes too long
+	 * @type {NodeJS.Timeout | undefined}
+	 */
+	#connectTimer;
+
+	/**
+	 * The heartbeat interval that probes the receiver while connected
+	 * @type {NodeJS.Timeout | undefined}
+	 */
+	#heartbeatTimer;
+
+	/**
+	 * Whether the current socket has finished connecting
+	 * @type {boolean}
+	 */
+	#connected = false;
+
+	/**
+	 * Whether the connection was stopped on purpose (no automatic reconnects)
+	 * @type {boolean}
+	 */
+	#stopped = false;
+
+	/**
+	 * Timestamp of the last data received from the receiver
+	 * @type {number}
+	 */
+	#lastDataAt = 0;
+
+	/**
+	 * Received data that does not yet form a complete line
+	 * @type {string}
+	 */
+	#rxBuffer = "";
+
+	/**
 	 * Recently sent target values, used to smooth late AVR echo responses.
 	 * @type {Array<{target?: number, expiresAt: number}>}
 	 */
@@ -217,12 +265,22 @@ export class AVRConnection {
 	}
 
 	/**
-	 * Connect to a receiver
+	 * Connect to a receiver. Any existing socket is torn down first.
 	 */
 	async connect() {
+		this.#stopped = false;
+		this.#clearReconnectTimer();
+		this.#teardownSocket();
+
 		this.#safeLog("debug", `Connecting to Denon receiver: ${this.#host}`);
 
+		if (!this.#connected && this.#reconnectCount === 0) {
+			this.status.statusMsg = "Connecting...";
+		}
+
 		let rawSocket = net.createConnection(23, this.#host);
+		rawSocket.setKeepAlive(true, 10000);
+		rawSocket.setNoDelay(true);
 		let telnet = new TelnetSocket(rawSocket);
 
 		// Connection lifecycle events
@@ -266,17 +324,79 @@ export class AVRConnection {
 		// Assign the telnet socket to the instance
 		this.#rawSocket = rawSocket;
 		this.#telnet = telnet;
+
+		// net.createConnection can hang for a long time, so give up early
+		this.#connectTimer = setTimeout(() => {
+			if (this.#telnet !== telnet) return;
+			this.#connectTimer = undefined;
+			this.#safeLog("warn", `Connection to Denon receiver at ${this.#host} timed out`);
+			telnet.destroy();
+		}, CONNECT_TIMEOUT_MS);
+	}
+
+	/**
+	 * Tear down the current socket and reconnect immediately, resetting the backoff
+	 */
+	reconnect() {
+		this.#reconnectCount = 0;
+		this.connect();
+	}
+
+	/**
+	 * Change the receiver's host, reconnecting if it differs from the current one
+	 * @param {string} host - The new IP address of the receiver
+	 */
+	setHost(host) {
+		if (!host || host === this.#host) return;
+
+		this.#safeLog("info", `Receiver host changed from ${this.#host} to ${host}`);
+		this.#host = host;
+		this.reconnect();
 	}
 
 	/**
 	 * Disconnect from the receiver and clean up resources
 	 */
 	disconnect() {
+		this.#stopped = true;
+		this.#clearReconnectTimer();
+		this.#teardownSocket();
+	}
+
+	/**
+	 * Clear the pending reconnect timer, if any
+	 */
+	#clearReconnectTimer() {
+		if (this.#reconnectTimer) {
+			clearTimeout(this.#reconnectTimer);
+			this.#reconnectTimer = undefined;
+		}
+	}
+
+	/**
+	 * Stop the per-socket timers
+	 */
+	#clearSocketTimers() {
+		if (this.#connectTimer) {
+			clearTimeout(this.#connectTimer);
+			this.#connectTimer = undefined;
+		}
+		if (this.#heartbeatTimer) {
+			clearInterval(this.#heartbeatTimer);
+			this.#heartbeatTimer = undefined;
+		}
+	}
+
+	/**
+	 * Dispose of the current sockets and their timers without scheduling a reconnect
+	 */
+	#teardownSocket() {
 		let rawSocket = this.#rawSocket;
 		let telnet = this.#telnet;
 
-		// Clear the listeners for this instance
-		this.#listenerIds = [];
+		this.#clearSocketTimers();
+		this.#connected = false;
+		this.#rxBuffer = "";
 
 		// Dispose of this instance's sockets
 		this.#rawSocket = undefined;
@@ -286,7 +406,7 @@ export class AVRConnection {
 			telnet.destroy();
 
 			// Set a timeout to clean up the sockets
-			setTimeout(1000).then(() => {
+			delay(1000).then(() => {
 				if (telnet && rawSocket?.destroyed !== true) {
 					telnet.unref();
 					rawSocket?.unref();
@@ -633,8 +753,26 @@ export class AVRConnection {
 	#onConnect() {
 		this.#safeLog("debug", `Telnet connection established to Denon receiver at ${this.#host}`);
 
+		this.#clearSocketTimers();
+		this.#connected = true;
 		this.#reconnectCount = 0;
+		this.#lastDataAt = Date.now();
 		this.status.statusMsg = "Connected.";
+
+		// Detect half-open connections (sleep, VPN or Wi-Fi changes)
+		const telnet = this.#telnet;
+		this.#heartbeatTimer = setInterval(() => {
+			if (this.#telnet !== telnet) return;
+
+			if (Date.now() - this.#lastDataAt > HEARTBEAT_DEAD_MS) {
+				this.#safeLog("warn", `No data from Denon receiver at ${this.#host} for ${HEARTBEAT_DEAD_MS / 1000}s, dropping connection`);
+				telnet.destroy();
+				return;
+			}
+
+			this.#sendCommand("PW?", "heartbeat");
+		}, HEARTBEAT_INTERVAL_MS);
+		this.#heartbeatTimer.unref();
 
 		this.emit("connected");
 
@@ -647,22 +785,27 @@ export class AVRConnection {
 	 */
 	#onClose(hadError = false) {
 		this.#safeLog(hadError ? "warn" : "debug", `Telnet connection to Denon receiver at ${this.#host} closed${hadError ? " due to error" : ""}.`);
+		this.#clearSocketTimers();
+		this.#connected = false;
 		this.#rawSocket = undefined;
 		this.#telnet = undefined;
 
 		this.emit("closed");
 
-		// Attempt to reconnect if we haven't given up yet
-		if (this.#reconnectCount < 10) {
-			this.#reconnectCount++;
-			this.status.statusMsg = `Reconnecting... (${this.#reconnectCount}/10)`;
-			this.emit("status");
+		// Retry forever with exponential backoff unless stopped on purpose
+		if (this.#stopped || this.#reconnectTimer) return;
 
-			setTimeout(1000).then(() => {
-				this.#safeLog("debug", `Trying to reconnect to Denon receiver at ${this.#host}. Attempt ${this.#reconnectCount}`);
-				this.connect();
-			});
-		}
+		this.#reconnectCount++;
+		const wait = Math.min(RECONNECT_BASE_MS * 2 ** (this.#reconnectCount - 1), RECONNECT_MAX_MS);
+		this.status.statusMsg = `Reconnecting... (attempt ${this.#reconnectCount})`;
+		this.emit("status");
+
+		this.#reconnectTimer = setTimeout(() => {
+			this.#reconnectTimer = undefined;
+			if (this.#stopped) return;
+			this.#safeLog("debug", `Trying to reconnect to Denon receiver at ${this.#host}. Attempt ${this.#reconnectCount}`);
+			this.connect();
+		}, wait);
 	}
 
 	/**
@@ -670,7 +813,17 @@ export class AVRConnection {
 	 * @param {Buffer | string} data
 	 */
 	#onData(data) {
-		let lines = data.toString().split("\r");
+		this.#lastDataAt = Date.now();
+
+		// Messages can be split across chunks, so only process complete lines
+		this.#rxBuffer += data.toString();
+		let lines = this.#rxBuffer.split("\r");
+		this.#rxBuffer = lines.pop() ?? "";
+		if (this.#rxBuffer.length > MAX_RX_BUFFER) {
+			this.#safeLog("warn", `Dropping oversized receive buffer from receiver at ${this.#host}`);
+			this.#rxBuffer = "";
+		}
+
 		for (let line of lines) {
 			if (line.length === 0) continue;
 
