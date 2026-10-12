@@ -76,8 +76,9 @@ function parseHeaders(message) {
 
 	const lines = message.toString().split("\r\n");
 	for (const line of lines) {
-		const [key, value] = line.split(": ");
-		headers[key] = value;
+		const separator = line.indexOf(":");
+		if (separator === -1) continue;
+		headers[line.substring(0, separator).trim().toUpperCase()] = line.substring(separator + 1).trim();
 	}
 
 	return headers;
@@ -101,6 +102,17 @@ function onResponse(message, rinfo) {
 	const uuid = usn.split("::")[0].split("uuid:")[1];
 	if (!uuid) {
 		logger.debug(`AVRTracker received a response with an invalid USN from ${rinfo.address}`);
+		return;
+	}
+
+	// Some devices (e.g. Hue bridges) answer every search regardless of its target,
+	// so only accept responses for the Denon device type, and forget any that were cached before
+	if (headers.ST?.toLowerCase() !== SSDP_SEARCH_TARGET.toLowerCase()) {
+		if (receiverList[uuid]) {
+			logger.info(`AVRTracker removing ${receiverList[uuid].name || uuid}, it is not a Denon receiver.`);
+			delete receiverList[uuid];
+			updatePersistentCache();
+		}
 		return;
 	}
 

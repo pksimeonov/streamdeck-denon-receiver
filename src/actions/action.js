@@ -53,7 +53,9 @@ const waitingActions = new Map();
  * Retry connecting every action that is still waiting for a receiver.
  */
 export function retryWaitingActions() {
-	for (const { owner, action } of [...waitingActions.values()]) {
+	const waiting = [...waitingActions.values()];
+	waitingActions.clear();
+	for (const { owner, action } of waiting) {
 		action.getSettings()
 			.then((settings) => owner.attachAction(action, /** @type {ActionSettings} */ (settings)))
 			.catch((error) => owner.logger.warn(`Failed to retry receiver for ${action.id}: ${error.message}`));
@@ -358,7 +360,7 @@ export class PluginAction extends SingletonAction {
 				value: ""
 			},
 			...Object.entries(receivers).map(([uuid, receiver]) => ({
-				label: receiver.name || receiver.currentIP,
+				label: receiver.name ? `${receiver.name} (${receiver.currentIP})` : receiver.currentIP,
 				value: uuid
 			}))
 		];
