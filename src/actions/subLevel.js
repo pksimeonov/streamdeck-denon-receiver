@@ -29,14 +29,11 @@ const ICON = "imgs/actions/sublevel/dial";
 @action({ UUID: "com.pksimeonov.denon-receiver.sublevel" })
 export class SubLevelAction extends PluginAction {
 	/**
-	 * Handle the will appear event.
-	 * @param {WillAppearEvent} ev - The event object.
+	 * Redraw the action from its receiver's current state.
+	 * @param {Action} action - The action object.
 	 */
-	async onWillAppear(ev) {
-		await super.onWillAppear(ev);
-
-		const connection = this.getConnection(ev.action.id);
-		updateActionState(ev.action, connection);
+	refreshActionState(action) {
+		updateActionState(action, this.getConnection(action.id));
 	}
 
 	/**
@@ -74,17 +71,6 @@ export class SubLevelAction extends PluginAction {
 	 */
 	onKeyDown(ev) {
 		this.getConnection(ev.action.id)?.setChannelLevel(CHANNEL, 50) || ev.action.showAlert();
-	}
-
-	/**
-	 * Handle a user configuring a receiver from the PI (discovered or manual IP).
-	 * @param {SendToPluginEvent} ev - The event object.
-	 */
-	async onUserConfiguredReceiver(ev) {
-		await super.onUserConfiguredReceiver(ev);
-
-		const connection = this.getConnection(ev.action.id);
-		updateActionState(ev.action, connection);
 	}
 
 	/**

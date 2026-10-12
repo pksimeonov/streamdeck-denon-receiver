@@ -21,15 +21,11 @@ const dynVolStates = {
 @action({ UUID: "com.pksimeonov.denon-receiver.dynvol" })
 export class DynVolAction extends PluginAction {
 	/**
-	 * Handle the action appearing on the Stream Deck.
-	 * @param {WillAppearEvent} ev - The event object.
+	 * Redraw the action from its receiver's current state.
+	 * @param {Action} action - The action object.
 	 */
-	async onWillAppear(ev) {
-		await super.onWillAppear(ev);
-
-		// Set the initial state of the action based on the receiver's dynamic volume status
-		const connection = this.getConnection(ev.action.id);
-		updateActionStatus(ev.action, connection);
+	refreshActionState(action) {
+		updateActionStatus(action, this.getConnection(action.id));
 	}
 
 	/**
@@ -49,17 +45,6 @@ export class DynVolAction extends PluginAction {
 		let newDynamicVolume = /** @type {DynamicVolume} */ (Object.keys(dynVolStates)[newDynamicVolumeState - 1]);
 
 		connection.setDynamicVolume(newDynamicVolume) || ev.action.showAlert();
-	}
-
-	/**
-	 * Handle a user configuring a receiver from the PI (discovered or manual IP).
-	 * @param {SendToPluginEvent} ev - The event object.
-	 */
-	async onUserConfiguredReceiver(ev) {
-		await super.onUserConfiguredReceiver(ev);
-
-		const connection = this.getConnection(ev.action.id);
-		updateActionStatus(ev.action, connection);
 	}
 
 	/**

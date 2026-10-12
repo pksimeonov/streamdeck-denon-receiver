@@ -8,6 +8,8 @@ import { DOMParser } from "@xmldom/xmldom";
 import streamDeck from "@elgato/streamdeck";
 /** @typedef {import("@elgato/streamdeck").Logger} Logger */
 
+import { GlobalSettings } from "./globals";
+
 /**
  * @typedef {Object} ReceiverInfo
  * @property {string} currentIP - The current IP address of the receiver
@@ -104,16 +106,24 @@ function onResponse(message, rinfo) {
 
 	logger.debug(`AVRTracker received an SSDP response from ${uuid}`);
 
-	const isNew = !receiverList[uuid];
+	const previous = receiverList[uuid];
+	const isNew = !previous;
 
 	// Update the list of receivers with details from the response
 	/** @type {ReceiverInfo} */
 	const receiver = {
 		currentIP: rinfo.address,
 		descriptionURL: headers.LOCATION || undefined,
-		lastSeen: Date.now()
+		lastSeen: Date.now(),
+		name: previous?.name
 	};
 	receiverList[uuid] = receiver;
+
+	// Let open connections follow the receiver to its new address (e.g. after a DHCP change)
+	if (previous && previous.currentIP !== rinfo.address) {
+		logger.info(`AVRTracker saw receiver ${uuid} move from ${previous.currentIP} to ${rinfo.address}.`);
+		setImmediate(() => emitter.emit("ipChanged", uuid, rinfo.address));
+	}
 
 	// If we have a description URL, try to get the name from it
 	if (receiver.descriptionURL && !receiver.name) {
@@ -142,7 +152,13 @@ async function updateNameFromDescriptionURL(receiverID) {
 	}
 
 	// Get the name of the receiver from the description URL
-	const response = await fetch(receiver.descriptionURL);
+	let response;
+	try {
+		response = await fetch(receiver.descriptionURL, { signal: AbortSignal.timeout(5000) });
+	} catch (error) {
+		logger.debug(`Failed to fetch device description for ${receiverID}: ${error.message}`);
+		return;
+	}
 	if (!response.ok) {
 		// If we couldn't get the description, just clear the URL and move on
 		delete receiver.descriptionURL;
@@ -166,26 +182,23 @@ async function updateNameFromDescriptionURL(receiverID) {
  * Update the global settings cache with the new receiver details.
  */
 function updatePersistentCache() {
-	streamDeck.settings.getGlobalSettings().then((settings) => {
-		settings.receiverList = receiverList;
-		streamDeck.settings.setGlobalSettings(settings)
-		.then(() => {
+	// Debounce, since a scan produces a burst of responses
+	clearTimeout(cacheWriteTimer);
+	cacheWriteTimer = setTimeout(() => {
+		GlobalSettings.update({ receiverList }).then(() => {
 			logger.debug("AVRTracker updated the global settings cache with the new receiver details.");
-		})
-		.catch((error) => {
-			logger.error(`AVRTracker failed to update the global settings cache: ${error}`);
 		});
-	});
+	}, 500);
 }
 
 /**
  * Initialize the receiver list from the global settings cache
  */
-async function readFromPersistentCache() {
-	const settings = (await streamDeck.settings.getGlobalSettings());
+function readFromPersistentCache() {
+	const settings = GlobalSettings.get();
 
 	if (settings.receiverList) {
-		receiverList = /** @type {ReceiverList} */ (settings.receiverList);
+		receiverList = settings.receiverList;
 	}
 }
 
@@ -279,7 +292,9 @@ async function createScannerSockets() {
  */
 export const AVRTracker = {
 	init: async () => {
-		// await readFromPersistentCache();
+		// Start from the cached receivers so that existing actions can connect right away,
+		// a scan afterwards refreshes their addresses
+		readFromPersistentCache();
 
 		// We've retrieved the receiver list from the cache, so we can clear the initial "scanning" state
 		isScanning = false;
@@ -309,10 +324,19 @@ export const AVRTracker = {
 			return receiverList;
 		}
 
-		const sockets = await createScannerSockets();
+		isScanning = true;
+
+		let sockets;
+		try {
+			sockets = await createScannerSockets();
+		} catch (error) {
+			logger.error(`AVRTracker can't scan: ${error.message}`);
+			isScanning = false;
+			emitter.emit("scanned");
+			return receiverList;
+		}
 
 		logger.info("AVRTracker broadcasting SSDP search for HEOS receivers on the network...");
-		isScanning = true;
 		const startTime = Date.now();
 
 		function onUpdate() {
@@ -369,7 +393,7 @@ export const AVRTracker = {
 
 	/**
 	 * Subscribe to be notified of scanning events
-	 * @param {"updated" | "scanned"} event - The event to listen for
+	 * @param {"updated" | "scanned" | "ipChanged"} event - The event to listen for
 	 * @param {EventListener} callback - The callback to call when the event is emitted
 	 */
 	on(event, callback) {
@@ -378,7 +402,7 @@ export const AVRTracker = {
 
 	/**
 	 * Subscribe to be notified (once) of a scanning event
-	 * @param {"updated" | "scanned"} event - The event to listen for
+	 * @param {"updated" | "scanned" | "ipChanged"} event - The event to listen for
 	 * @param {EventListener} callback - The callback to call when the event is emitted
 	 */
 	once(event, callback) {
@@ -387,7 +411,7 @@ export const AVRTracker = {
 
 	/**
 	 * Unsubscribe from scanning events
-	 * @param {"updated" | "scanned"} event - The event to remove the listener from
+	 * @param {"updated" | "scanned" | "ipChanged"} event - The event to remove the listener from
 	 * @param {EventListener} callback - The callback to remove
 	 */
 	off(event, callback) {

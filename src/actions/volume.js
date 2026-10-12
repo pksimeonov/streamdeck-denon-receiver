@@ -25,15 +25,11 @@ const images = {
 @action({ UUID: "com.pksimeonov.denon-receiver.volume" })
 export class VolumeAction extends PluginAction {
 	/**
-	 * Handle the will appear event.
-	 * @param {WillAppearEvent} ev - The event object.
+	 * Redraw the action from its receiver's current state.
+	 * @param {Action} action - The action object.
 	 */
-	async onWillAppear(ev) {
-		await super.onWillAppear(ev);
-
-		// Set the initial state of the action based on the receiver's volume & mute status
-		const connection = this.getConnection(ev.action.id);
-		updateActionState(ev.action, connection);
+	refreshActionState(action) {
+		updateActionState(action, this.getConnection(action.id));
 	}
 
 	/**
@@ -112,18 +108,6 @@ export class VolumeAction extends PluginAction {
 				connection.setMute(false, settings.zone) || ev.action.showAlert();
 				break;
 		}
-	}
-
-	/**
-	 * Handle a user configuring a receiver from the PI (discovered or manual IP).
-	 * @param {SendToPluginEvent} ev - The event object.
-	 */
-	async onUserConfiguredReceiver(ev) {
-		await super.onUserConfiguredReceiver(ev);
-
-		// Update the action state for the new receiver
-		const connection = this.getConnection(ev.action.id);
-		updateActionState(ev.action, connection);
 	}
 
 	/**
