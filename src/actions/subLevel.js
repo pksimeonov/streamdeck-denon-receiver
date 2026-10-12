@@ -15,6 +15,25 @@ import { PluginAction } from "./action";
 
 const CHANNEL = "SW";
 const ICON = "imgs/actions/sublevel/dial";
+const CIRCLE_ICON = "imgs/actions/sublevel/circle";
+
+/**
+ * The image last set on each dial's circle, so it is only sent when it changes.
+ * Stream Deck doesn't reliably use the manifest's Encoder.Icon, so the plugin sets it.
+ * @type {Map<string, string>}
+ */
+const dialImages = new Map();
+
+/**
+ * Set the image in a dial's circle, if it changed.
+ * @param {Action} action - The dial action.
+ * @param {string} image - The image path, without the file extension.
+ */
+function setDialImage(action, image) {
+	if (dialImages.get(action.id) === image) return;
+	dialImages.set(action.id, image);
+	action.setImage(`${image}.svg`);
+}
 
 /**
  * The Subwoofer Level action class.
@@ -135,6 +154,7 @@ async function updateActionState(action, connection) {
 			value: value,
 			icon: ICON
 		});
+		setDialImage(action, CIRCLE_ICON);
 	} else if (action.isKey()) {
 		// Companion display button — show the current level as the title
 		action.setTitle(formatLevel(dbOffset, power));

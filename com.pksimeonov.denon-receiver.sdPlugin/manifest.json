@@ -6,7 +6,7 @@
 		{
 			"Name": "Volume Control",
 			"UUID": "com.pksimeonov.denon-receiver.volume",
-			"Icon": "imgs/actions/volume/volume2",
+			"Icon": "imgs/actions/volume/icon",
 			"Tooltip": "Displays the current volume and allows for adjustment.",
 			"PropertyInspectorPath": "ui/action.html",
 			"Controllers": [
@@ -16,7 +16,7 @@
 			"DisableAutomaticStates": true,
 			"Encoder": {
 				"layout": "$B1",
-				"Icon": "imgs/actions/volume/dial-unmuted",
+				"Icon": "imgs/actions/volume/circle-unmuted",
 				"TriggerDescription": {
 					"Push": "Mute/Unmute",
 					"Rotate": "Adjust Volume",
@@ -124,7 +124,7 @@
 		{
 			"Name": "Subwoofer Level",
 			"UUID": "com.pksimeonov.denon-receiver.sublevel",
-			"Icon": "imgs/actions/sublevel/sublevel",
+			"Icon": "imgs/actions/sublevel/icon",
 			"Tooltip": "Adjusts the subwoofer channel level (Options → Channel Level). Does not affect MultEQ calibration. Place on a dial to adjust, or on a key to show the current level and reset to 0 dB.",
 			"PropertyInspectorPath": "ui/action.html",
 			"Controllers": [
@@ -134,7 +134,7 @@
 			"DisableAutomaticStates": true,
 			"Encoder": {
 				"layout": "$B1",
-				"Icon": "imgs/actions/sublevel/dial",
+				"Icon": "imgs/actions/sublevel/circle",
 				"TriggerDescription": {
 					"Push": "Reset to 0dB",
 					"Rotate": "Adjust Sub Level",

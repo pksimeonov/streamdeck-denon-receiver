@@ -13,10 +13,34 @@ import { PluginAction } from "./action";
 /** @typedef {import("../modules/connection").AVRConnection} AVRConnection */
 /** @typedef {import("../modules/connection").ReceiverEvent} ReceiverEvent */
 
+/** Smaller variants of the icons for the dial's circle */
+const circleImages = {
+	unmuted: "imgs/actions/volume/circle-unmuted",
+	muted: "imgs/actions/volume/circle-muted"
+};
+
 const images = {
 	unmuted: "imgs/actions/volume/dial-unmuted",
 	muted: "imgs/actions/volume/dial-muted"
 };
+
+/**
+ * The image last set on each dial's circle, so it is only sent when it changes.
+ * Stream Deck doesn't reliably use the manifest's Encoder.Icon, so the plugin sets it.
+ * @type {Map<string, string>}
+ */
+const dialImages = new Map();
+
+/**
+ * Set the image in a dial's circle, if it changed.
+ * @param {Action} action - The dial action.
+ * @param {string} image - The image path, without the file extension.
+ */
+function setDialImage(action, image) {
+	if (dialImages.get(action.id) === image) return;
+	dialImages.set(action.id, image);
+	action.setImage(`${image}.svg`);
+}
 
 /**
  * The Volume action class.
@@ -169,6 +193,7 @@ async function updateActionState(action, connection, zone) {
 			value: value,
 			icon: icon
 		});
+		setDialImage(action, muted || !power ? circleImages.muted : circleImages.unmuted);
 	} else if (action.isKey()) {
 		const volumeAction = settings.volumeAction || "toggleMute";
 
